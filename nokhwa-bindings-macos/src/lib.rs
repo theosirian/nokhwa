@@ -33,13 +33,15 @@ mod internal {
     pub mod core_media {
         // all of this is stolen from bindgen
         // steal it idc
-        use crate::internal::CGFloat;
+        use std::ops::Deref;
+
         use core_media_sys::{
             CMBlockBufferRef, CMFormatDescriptionRef, CMSampleBufferRef, CMTime, CMVideoDimensions,
             FourCharCode,
         };
         use objc::{runtime::Object, Message};
-        use std::ops::Deref;
+
+        use crate::internal::CGFloat;
 
         pub type Id = *mut Object;
 
@@ -197,15 +199,14 @@ mod internal {
         }
     }
 
-    use crate::core_media::{
-        dispatch_queue_create, AVCaptureExposureDurationCurrent,
-        AVCaptureExposureTargetBiasCurrent, AVCaptureISOCurrent, AVCaptureWhiteBalanceGains,
-        AVMediaTypeAudio, AVMediaTypeClosedCaption, AVMediaTypeDepthData, AVMediaTypeMetadata,
-        AVMediaTypeMetadataObject, AVMediaTypeMuxed, AVMediaTypeSubtitle, AVMediaTypeText,
-        AVMediaTypeTimecode, AVMediaTypeVideo, CGPoint, CMSampleBufferGetImageBuffer,
-        CMVideoFormatDescriptionGetDimensions, CVImageBufferRef, CVPixelBufferGetBaseAddress,
-        CVPixelBufferGetDataSize, CVPixelBufferLockBaseAddress, CVPixelBufferUnlockBaseAddress,
-        NSObject, OSType,
+    use std::{
+        borrow::Cow,
+        cmp::Ordering,
+        collections::BTreeMap,
+        convert::TryFrom,
+        error::Error,
+        ffi::{c_float, c_void, CStr, CString},
+        sync::Arc,
     };
 
     use block::ConcreteBlock;
@@ -214,7 +215,7 @@ mod internal {
         foundation::{NSArray, NSDictionary, NSInteger, NSString, NSUInteger},
     };
     use core_media_sys::{
-        kCMPixelFormat_24RGB, kCMPixelFormat_422YpCbCr8_yuvs,
+        kCMPixelFormat_24RGB, kCMPixelFormat_32BGRA, kCMPixelFormat_422YpCbCr8_yuvs,
         kCMPixelFormat_8IndexedGray_WhiteIsZero, kCMVideoCodecType_422YpCbCr8,
         kCMVideoCodecType_JPEG, kCMVideoCodecType_JPEG_OpenDML, CMFormatDescriptionGetMediaSubType,
         CMFormatDescriptionRef, CMSampleBufferRef, CMTime, CMVideoDimensions,
@@ -222,7 +223,8 @@ mod internal {
     use core_video_sys::{
         kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange,
         kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
-        kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+        kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVPixelFormatType_420YpCbCr8Planar,
+        kCVPixelFormatType_422YpCbCr8, kCVPixelFormatType_422YpCbCr8_yuvs,
     };
     use flume::{Receiver, Sender};
     use nokhwa_core::{
@@ -233,21 +235,21 @@ mod internal {
             KnownCameraControlFlag, Resolution,
         },
     };
-    use objc::runtime::objc_getClass;
     use objc::{
         declare::ClassDecl,
-        runtime::{Class, Object, Protocol, Sel, BOOL, NO, YES},
+        runtime::{objc_getClass, Class, Object, Protocol, Sel, BOOL, NO, YES},
     };
     use once_cell::sync::Lazy;
-    use std::ffi::CString;
-    use std::{
-        borrow::Cow,
-        cmp::Ordering,
-        collections::BTreeMap,
-        convert::TryFrom,
-        error::Error,
-        ffi::{c_float, c_void, CStr},
-        sync::Arc,
+
+    use crate::core_media::{
+        dispatch_queue_create, AVCaptureExposureDurationCurrent,
+        AVCaptureExposureTargetBiasCurrent, AVCaptureISOCurrent, AVCaptureWhiteBalanceGains,
+        AVMediaTypeAudio, AVMediaTypeClosedCaption, AVMediaTypeDepthData, AVMediaTypeMetadata,
+        AVMediaTypeMetadataObject, AVMediaTypeMuxed, AVMediaTypeSubtitle, AVMediaTypeText,
+        AVMediaTypeTimecode, AVMediaTypeVideo, CGPoint, CMSampleBufferGetImageBuffer,
+        CMVideoFormatDescriptionGetDimensions, CVImageBufferRef, CVPixelBufferGetBaseAddress,
+        CVPixelBufferGetDataSize, CVPixelBufferLockBaseAddress, CVPixelBufferUnlockBaseAddress,
+        NSObject, OSType,
     };
 
     const UTF8_ENCODING: usize = 4;
@@ -365,16 +367,19 @@ mod internal {
     #[allow(non_upper_case_globals)]
     fn raw_fcc_to_frameformat(raw: OSType) -> Option<FrameFormat> {
         match raw {
-            kCMVideoCodecType_422YpCbCr8 | kCMPixelFormat_422YpCbCr8_yuvs => {
-                Some(FrameFormat::YUYV)
-            }
+            kCVPixelFormatType_420YpCbCr8Planar => Some(FrameFormat::I420),
+            kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange => Some(FrameFormat::NV12),
+            kCVPixelFormatType_422YpCbCr8_yuvs => Some(FrameFormat::YUYV),
+            kCVPixelFormatType_422YpCbCr8 => Some(FrameFormat::UYVY),
+
             kCMVideoCodecType_JPEG | kCMVideoCodecType_JPEG_OpenDML => Some(FrameFormat::MJPEG),
             kCMPixelFormat_8IndexedGray_WhiteIsZero => Some(FrameFormat::GRAY),
-            kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
-            | kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-            | kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange => Some(FrameFormat::YUYV),
             kCMPixelFormat_24RGB => Some(FrameFormat::RAWRGB),
-            _ => None,
+            kCMPixelFormat_32BGRA => Some(FrameFormat::RAWBGRA),
+            unknown => {
+                println!("{:?}", unknown);
+                None
+            }
         }
     }
 
@@ -518,6 +523,7 @@ mod internal {
             AVCaptureDeviceType::Telephoto,
             AVCaptureDeviceType::TrueDepth,
             AVCaptureDeviceType::External,
+            AVCaptureDeviceType::ExternalUnknown,
         ])?
         .devices())
     }
@@ -548,6 +554,7 @@ mod internal {
         Telephoto,
         TrueDepth,
         External,
+        ExternalUnknown,
     }
 
     impl From<AVCaptureDeviceType> for *mut Object {
@@ -572,8 +579,9 @@ mod internal {
                 AVCaptureDeviceType::TrueDepth => {
                     str_to_nsstr("AVCaptureDeviceTypeBuiltInTrueDepthCamera")
                 }
-                AVCaptureDeviceType::External => {
-                    str_to_nsstr("AVCaptureDeviceTypeExternal")
+                AVCaptureDeviceType::External => str_to_nsstr("AVCaptureDeviceTypeExternal"),
+                AVCaptureDeviceType::ExternalUnknown => {
+                    str_to_nsstr("AVCaptureDeviceTypeExternalUnknown")
                 }
             }
         }
@@ -814,8 +822,10 @@ mod internal {
                 AVCaptureDeviceType::UltraWide,
                 AVCaptureDeviceType::Telephoto,
                 AVCaptureDeviceType::External,
+                AVCaptureDeviceType::ExternalUnknown,
                 AVCaptureDeviceType::Dual,
                 AVCaptureDeviceType::DualWide,
+                AVCaptureDeviceType::Triple,
                 AVCaptureDeviceType::Triple,
             ])
         }
@@ -2280,11 +2290,16 @@ mod internal {
 
         pub fn set_frame_format(&self, format: FrameFormat) -> Result<(), NokhwaError> {
             let cmpixelfmt = match format {
-                FrameFormat::YUYV => kCMPixelFormat_422YpCbCr8_yuvs,
                 FrameFormat::MJPEG => kCMVideoCodecType_JPEG,
                 FrameFormat::GRAY => kCMPixelFormat_8IndexedGray_WhiteIsZero,
-                FrameFormat::NV12 => kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange,
+
+                FrameFormat::I420 => kCVPixelFormatType_420YpCbCr8Planar,
+                FrameFormat::NV12 => kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+                FrameFormat::YUYV => kCVPixelFormatType_422YpCbCr8_yuvs,
+                FrameFormat::UYVY => kCVPixelFormatType_422YpCbCr8,
+
                 FrameFormat::RAWRGB => kCMPixelFormat_24RGB,
+                FrameFormat::RAWBGRA => kCMPixelFormat_32BGRA,
                 FrameFormat::RAWBGR => {
                     return Err(NokhwaError::SetPropertyError {
                         property: "setVideoSettings".to_string(),
@@ -2303,8 +2318,7 @@ mod internal {
     }
 
     use cocoa_foundation::base::nil;
-    use core_foundation::base::TCFType;
-    use core_foundation::number::CFNumber;
+    use core_foundation::{base::TCFType, number::CFNumber};
     use core_video_sys::kCVPixelBufferPixelFormatTypeKey;
     impl Default for AVCaptureVideoDataOutput {
         fn default() -> Self {

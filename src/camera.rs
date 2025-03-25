@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-use nokhwa_core::types::RequestedFormatType;
+use std::{borrow::Cow, collections::HashMap};
+
 use nokhwa_core::{
     buffer::Buffer,
     error::NokhwaError,
@@ -22,10 +23,9 @@ use nokhwa_core::{
     traits::CaptureBackendTrait,
     types::{
         ApiBackend, CameraControl, CameraFormat, CameraIndex, CameraInfo, ControlValueSetter,
-        FrameFormat, KnownCameraControl, RequestedFormat, Resolution,
+        FrameFormat, KnownCameraControl, RequestedFormat, RequestedFormatType, Resolution,
     },
 };
-use std::{borrow::Cow, collections::HashMap};
 #[cfg(feature = "output-wgpu")]
 use wgpu::{Device as WgpuDevice, Queue as WgpuQueue, Texture as WgpuTexture};
 

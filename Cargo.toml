@@ -60,7 +60,6 @@ optional = true
 
 [dependencies.image]
 version = "0.25"
-default-features = false
 
 [dependencies.usb_enumeration]
 version = "0.2"

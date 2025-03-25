@@ -16,19 +16,19 @@
 
 // Some assembly required. For developers 7 and up.
 
+use std::{str::FromStr, sync::Arc, time::Duration};
+
 use clap::{Parser, Subcommand};
 use color_eyre::Report;
 use flume::Receiver;
-use ggez::graphics::ImageFormat;
 use ggez::{
     event::{run, EventHandler},
-    graphics::{Canvas, Image},
+    graphics::{self, Canvas, Color, DrawParam, Image, ImageFormat},
     Context, ContextBuilder, GameError,
 };
-use nokhwa::pixel_format::RgbFormat;
 use nokhwa::{
     native_api_backend,
-    pixel_format::RgbAFormat,
+    pixel_format::{RgbAFormat, RgbFormat},
     query,
     utils::{
         frame_formats, yuyv422_predicted_size, CameraFormat, CameraIndex, FrameFormat,
@@ -36,9 +36,6 @@ use nokhwa::{
     },
     Buffer, CallbackCamera, Camera,
 };
-use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Duration;
 
 struct CaptureState {
     receiver: Arc<Receiver<Buffer>>,
@@ -68,7 +65,9 @@ impl EventHandler<GameError> for CaptureState {
             self.format.width(),
             self.format.height(),
         );
-        let canvas = Canvas::from_image(ctx, image, None);
+        let mut canvas = graphics::Canvas::from_frame(ctx, Color::from([0.1, 0.2, 0.3, 1.0]));
+        canvas.draw(&image, DrawParam::new());
+        // let canvas = Canvas::from_screen_image(ctx, image, None);
         canvas.finish(ctx)
     }
 }
@@ -238,15 +237,15 @@ impl FromStr for PropertyKind {
     }
 }
 
-fn main() {
-    nokhwa::nokhwa_initialize(|x| {
-        println!("Nokhwa Initalized: {x}");
-        nokhwa_main()
-    });
-    std::thread::sleep(Duration::from_millis(2000));
-}
+// fn main() {
+//     nokhwa::nokhwa_initialize(|x| {
+//         println!("Nokhwa Initalized: {x}");
+//         nokhwa_main()
+//     });
+//     std::thread::sleep(Duration::from_millis(2000));
+// }
 
-fn nokhwa_main() {
+fn main() {
     let cli = Cli::parse();
 
     let cmd = match &cli.command {

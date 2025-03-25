@@ -13,13 +13,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-use crate::error::NokhwaError;
-use crate::types::{
-    buf_bgr_to_rgb, buf_mjpeg_to_rgb, buf_nv12_to_rgb, buf_yuyv422_to_rgb, color_frame_formats, frame_formats,
-    mjpeg_to_rgb, nv12_to_rgb, yuyv422_to_rgb, FrameFormat, Resolution,
-};
-use image::{Luma, LumaA, Pixel, Rgb, Rgba};
 use std::fmt::Debug;
+
+use image::{Luma, LumaA, Pixel, Rgb, Rgba};
+
+use crate::{
+    error::NokhwaError,
+    types::{
+        buf_bgr_to_rgb, buf_bgra_to_rgb, buf_mjpeg_to_rgb, buf_nv12_to_rgb, buf_yuyv422_to_rgb,
+        color_frame_formats, frame_formats, mjpeg_to_rgb, nv12_to_rgb, yuyv422_to_rgb, FrameFormat,
+        Resolution,
+    },
+};
 
 /// Trait that has methods to convert raw data from the webcam to a proper raw image.
 pub trait FormatDecoder: Clone + Sized + Send + Sync {
@@ -85,8 +90,21 @@ impl FormatDecoder for RgbFormat {
                     rgb[index + 2] = px[0];
                 });
                 Ok(rgb)
-            },
+            }
+            FrameFormat::RAWBGRA => {
+                let mut rgb = vec![0u8; data.len()];
+                data.chunks_exact(4).enumerate().for_each(|(idx, px)| {
+                    let index = idx * 3;
+                    rgb[index] = px[2];
+                    rgb[index + 1] = px[1];
+                    rgb[index + 2] = px[0];
+                });
+                Ok(rgb)
+            }
             FrameFormat::NV12 => nv12_to_rgb(resolution, data, false),
+            f => Err(NokhwaError::NotImplementedError(format!(
+                "Conversion to RGB not implemented for frame format {f}"
+            ))),
         }
     }
 
@@ -122,7 +140,11 @@ impl FormatDecoder for RgbFormat {
                 Ok(())
             }
             FrameFormat::RAWBGR => buf_bgr_to_rgb(resolution, data, dest),
+            FrameFormat::RAWBGRA => buf_bgra_to_rgb(resolution, data, dest),
             FrameFormat::NV12 => buf_nv12_to_rgb(resolution, data, dest, false),
+            f => Err(NokhwaError::NotImplementedError(format!(
+                "Conversion to RGB not implemented for frame format {f}"
+            ))),
         }
     }
 }
@@ -165,7 +187,14 @@ impl FormatDecoder for RgbAFormat {
                 .chunks_exact(3)
                 .flat_map(|x| [x[2], x[1], x[0], 255])
                 .collect()),
+            FrameFormat::RAWBGRA => Ok(data
+                .chunks_exact(3)
+                .flat_map(|x| [x[2], x[1], x[0], x[3]])
+                .collect()),
             FrameFormat::NV12 => nv12_to_rgb(resolution, data, true),
+            f => Err(NokhwaError::NotImplementedError(format!(
+                "Conversion to RGBA not implemented for frame format {f}"
+            ))),
         }
     }
 
@@ -218,7 +247,20 @@ impl FormatDecoder for RgbAFormat {
                 });
                 Ok(())
             }
+            FrameFormat::RAWBGRA => {
+                data.chunks_exact(4).enumerate().for_each(|(idx, px)| {
+                    let index = idx * 4;
+                    dest[index] = px[2];
+                    dest[index + 1] = px[1];
+                    dest[index + 2] = px[0];
+                    dest[index + 3] = px[3];
+                });
+                Ok(())
+            }
             FrameFormat::NV12 => buf_nv12_to_rgb(resolution, data, dest, true),
+            f => Err(NokhwaError::NotImplementedError(format!(
+                "Conversion to RGBA not implemented for frame format {f}"
+            ))),
         }
     }
 }
@@ -282,6 +324,13 @@ impl FormatDecoder for LumaFormat {
                 .chunks(3)
                 .map(|px| ((i32::from(px[2]) + i32::from(px[1]) + i32::from(px[0])) / 3) as u8)
                 .collect()),
+            FrameFormat::RAWBGRA => Ok(data
+                .chunks(4)
+                .map(|px| ((i32::from(px[2]) + i32::from(px[1]) + i32::from(px[0])) / 3) as u8)
+                .collect()),
+            f => Err(NokhwaError::NotImplementedError(format!(
+                "Conversion to Luma not implemented for frame format {f}"
+            ))),
         }
     }
 
@@ -317,6 +366,14 @@ impl FormatDecoder for LumaFormat {
                 destination: "BGR => Luma".to_string(),
                 error: "Conversion Error".to_string(),
             }),
+            FrameFormat::RAWBGRA => Err(NokhwaError::ProcessFrameError {
+                src: fcc,
+                destination: "BGRA => Luma".to_string(),
+                error: "Conversion Error".to_string(),
+            }),
+            f => Err(NokhwaError::NotImplementedError(format!(
+                "Conversion to Luma not implemented for frame format {f}"
+            ))),
         }
     }
 }
@@ -381,6 +438,14 @@ impl FormatDecoder for LumaAFormat {
                 destination: "BGR => LumaA".to_string(),
                 error: "Conversion Error".to_string(),
             }),
+            FrameFormat::RAWBGRA => Err(NokhwaError::ProcessFrameError {
+                src: fcc,
+                destination: "BGRA => LumaA".to_string(),
+                error: "Conversion Error".to_string(),
+            }),
+            f => Err(NokhwaError::NotImplementedError(format!(
+                "Conversion to LumaA not implemented for frame format {f}"
+            ))),
         }
     }
 
@@ -439,11 +504,17 @@ impl FormatDecoder for LumaAFormat {
                 destination: "BGR => LumaA".to_string(),
                 error: "Conversion Error".to_string(),
             }),
+            FrameFormat::RAWBGRA => Err(NokhwaError::ProcessFrameError {
+                src: fcc,
+                destination: "BGRA => LumaA".to_string(),
+                error: "Conversion Error".to_string(),
+            }),
+            f => Err(NokhwaError::NotImplementedError(format!(
+                "Conversion to LumaA not implemented for frame format {f}"
+            ))),
         }
     }
 }
-
-
 
 /// let image: ImageBuffer<Rgb<u8>, Vec<u8>> = buffer.to_image::<YuyvFormat>();
 /// ```

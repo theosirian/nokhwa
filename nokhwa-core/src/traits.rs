@@ -14,6 +14,15 @@
  * limitations under the License.
  */
 
+use std::{borrow::Cow, collections::HashMap};
+
+#[cfg(feature = "wgpu-types")]
+use wgpu::{
+    Device as WgpuDevice, Extent3d, ImageCopyTexture, ImageDataLayout, Queue as WgpuQueue,
+    Texture as WgpuTexture, TextureAspect, TextureDescriptor, TextureDimension, TextureFormat,
+    TextureUsages,
+};
+
 use crate::{
     buffer::Buffer,
     error::NokhwaError,
@@ -21,13 +30,6 @@ use crate::{
         ApiBackend, CameraControl, CameraFormat, CameraInfo, ControlValueSetter, FrameFormat,
         KnownCameraControl, Resolution,
     },
-};
-use std::{borrow::Cow, collections::HashMap};
-#[cfg(feature = "wgpu-types")]
-use wgpu::{
-    Device as WgpuDevice, Extent3d, ImageCopyTexture, ImageDataLayout, Queue as WgpuQueue,
-    Texture as WgpuTexture, TextureAspect, TextureDescriptor, TextureDimension, TextureFormat,
-    TextureUsages,
 };
 
 /// This trait is for any backend that allows you to grab and take frames from a camera.
@@ -37,8 +39,7 @@ use wgpu::{
 /// - Backends, if not provided with a camera format, will be spawned with 640x480@15 FPS, MJPEG [`CameraFormat`].
 /// - Behaviour can differ from backend to backend. While the Camera struct abstracts most of this away, if you plan to use the raw backend structs please read the `Quirks` section of each backend.
 /// - If you call [`stop_stream()`](CaptureBackendTrait::stop_stream()), you will usually need to call [`open_stream()`](CaptureBackendTrait::open_stream()) to get more frames from the camera.
-pub trait
-CaptureBackendTrait {
+pub trait CaptureBackendTrait {
     /// Returns the current backend used.
     fn backend(&self) -> ApiBackend;
 
@@ -173,7 +174,14 @@ CaptureBackendTrait {
         let cfmt = self.camera_format();
         let resolution = cfmt.resolution();
         let pxwidth = match cfmt.format() {
-            FrameFormat::MJPEG | FrameFormat::YUYV | FrameFormat::RAWRGB | FrameFormat::RAWBGR | FrameFormat::NV12 => 3,
+            FrameFormat::RAWBGRA => 4,
+            FrameFormat::MJPEG
+            | FrameFormat::I420
+            | FrameFormat::YUYV
+            | FrameFormat::UYVY
+            | FrameFormat::NV12
+            | FrameFormat::RAWRGB
+            | FrameFormat::RAWBGR => 3,
             FrameFormat::GRAY => 1,
         };
         if alpha {

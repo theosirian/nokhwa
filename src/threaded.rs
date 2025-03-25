@@ -14,7 +14,15 @@
  * limitations under the License.
  */
 
-use crate::Camera;
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    thread::JoinHandle,
+};
+
 use nokhwa_core::{
     buffer::Buffer,
     error::NokhwaError,
@@ -23,14 +31,8 @@ use nokhwa_core::{
         FrameFormat, KnownCameraControl, RequestedFormat, RequestedFormatType, Resolution,
     },
 };
-use std::thread::JoinHandle;
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
-};
+
+use crate::Camera;
 
 type AtomicLock<T> = Arc<Mutex<T>>;
 type HeldCallbackType = Arc<Mutex<Box<dyn FnMut(Buffer) + Send + 'static>>>;
@@ -176,6 +178,13 @@ impl CallbackCamera {
         fourcc: FrameFormat,
     ) -> Result<HashMap<Resolution, Vec<u32>>, NokhwaError> {
         self.camera.lock().compatible_list_by_resolution(fourcc)
+    }
+
+    /// A Vector of available [`CameraFormat`]s.
+    /// # Errors
+    /// This will error if the camera is not queryable or a query operation has failed. Some backends will error this out as a [`UnsupportedOperationError`](crate::NokhwaError::UnsupportedOperationError).
+    pub fn compatible_camera_formats(&mut self) -> Result<Vec<CameraFormat>, NokhwaError> {
+        self.camera.lock().compatible_camera_formats()
     }
 
     /// A Vector of compatible [`FrameFormat`]s.
