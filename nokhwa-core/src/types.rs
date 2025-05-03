@@ -1783,7 +1783,7 @@ pub fn buf_nv12_to_rgb(
         });
     }
 
-    let input_size = ((resolution.width() * resolution.height() * 3) / 2) as usize;
+    let input_size = (resolution.width() * resolution.height() * 2) as usize;
 
     if data.len() != input_size {
         return Err(NokhwaError::ProcessFrameError {
