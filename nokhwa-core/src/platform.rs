@@ -1,7 +1,12 @@
-use crate::camera::{AsyncCamera, Camera};
-use crate::error::NokhwaResult;
-use crate::types::{CameraIndex, CameraInformation};
 use std::fmt::{Display, Formatter};
+
+#[cfg(feature = "async")]
+use crate::camera::AsyncCamera;
+use crate::{
+    camera::Camera,
+    error::NokhwaResult,
+    types::{CameraIndex, CameraInformation},
+};
 
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub enum Backends {
@@ -31,9 +36,9 @@ pub trait PlatformTrait {
 
     fn open(&mut self, index: CameraIndex) -> NokhwaResult<Self::Camera>;
 
-    fn open_dynamic(&mut self, index: CameraIndex) -> NokhwaResult<Box<dyn Camera>> {
-        self.open(index).map(|cam| Box::new(cam))
-    }
+    // fn open_dynamic(&mut self, index: CameraIndex) -> NokhwaResult<Box<dyn Camera>> {
+    //     self.open(index).map(|cam: Self::Camera| Box::new(cam))
+    // }
 }
 
 #[cfg(feature = "async")]

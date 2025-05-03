@@ -31,13 +31,15 @@ mod internal {
     pub mod core_media {
         // all of this is stolen from bindgen
         // steal it idc
-        use crate::internal::CGFloat;
+        use std::ops::Deref;
+
         use core_media_sys::{
             CMBlockBufferRef, CMFormatDescriptionRef, CMSampleBufferRef, CMTime, CMVideoDimensions,
             FourCharCode,
         };
         use objc::{runtime::Object, Message};
-        use std::ops::Deref;
+
+        use crate::internal::CGFloat;
 
         pub type Id = *mut Object;
 
@@ -195,15 +197,14 @@ mod internal {
         }
     }
 
-    use crate::core_media::{
-        dispatch_queue_create, AVCaptureExposureDurationCurrent,
-        AVCaptureExposureTargetBiasCurrent, AVCaptureISOCurrent, AVCaptureWhiteBalanceGains,
-        AVMediaTypeAudio, AVMediaTypeClosedCaption, AVMediaTypeDepthData, AVMediaTypeMetadata,
-        AVMediaTypeMetadataObject, AVMediaTypeMuxed, AVMediaTypeSubtitle, AVMediaTypeText,
-        AVMediaTypeTimecode, AVMediaTypeVideo, CGPoint, CMSampleBufferGetImageBuffer,
-        CMVideoFormatDescriptionGetDimensions, CVImageBufferRef, CVPixelBufferGetBaseAddress,
-        CVPixelBufferGetDataSize, CVPixelBufferLockBaseAddress, CVPixelBufferUnlockBaseAddress,
-        NSObject, OSType,
+    use std::{
+        borrow::Cow,
+        cmp::Ordering,
+        collections::BTreeMap,
+        convert::TryFrom,
+        error::Error,
+        ffi::{c_float, c_void, CStr, CString},
+        sync::Arc,
     };
 
     use block::ConcreteBlock;
@@ -223,30 +224,28 @@ mod internal {
     };
     use flume::{Receiver, Sender};
     use nokhwa_core::{
+        control::ControlValue,
         error::NokhwaError,
-        types::{
-            ApiBackend, CameraFormat, CameraIndex, CameraInformation,
-            FrameFormat,
-            KnownCameraControlFlag, Resolution,
-        },
+        frame_format::FrameFormat,
+        platform::Backends,
+        types::{CameraFormat, CameraIndex, CameraInformation, FrameRate, Resolution},
     };
-    use objc::runtime::objc_getClass;
     use objc::{
         declare::ClassDecl,
-        runtime::{Class, Object, Protocol, Sel, BOOL, NO, YES},
+        runtime::{objc_getClass, Class, Object, Protocol, Sel, BOOL, NO, YES},
     };
     use once_cell::sync::Lazy;
-    use std::ffi::CString;
-    use std::{
-        borrow::Cow,
-        cmp::Ordering,
-        collections::BTreeMap,
-        convert::TryFrom,
-        error::Error,
-        ffi::{c_float, c_void, CStr},
-        sync::Arc,
+
+    use crate::core_media::{
+        dispatch_queue_create, AVCaptureExposureDurationCurrent,
+        AVCaptureExposureTargetBiasCurrent, AVCaptureISOCurrent, AVCaptureWhiteBalanceGains,
+        AVMediaTypeAudio, AVMediaTypeClosedCaption, AVMediaTypeDepthData, AVMediaTypeMetadata,
+        AVMediaTypeMetadataObject, AVMediaTypeMuxed, AVMediaTypeSubtitle, AVMediaTypeText,
+        AVMediaTypeTimecode, AVMediaTypeVideo, CGPoint, CMSampleBufferGetImageBuffer,
+        CMVideoFormatDescriptionGetDimensions, CVImageBufferRef, CVPixelBufferGetBaseAddress,
+        CVPixelBufferGetDataSize, CVPixelBufferLockBaseAddress, CVPixelBufferUnlockBaseAddress,
+        NSObject, OSType,
     };
-    use nokhwa_core::control::{CameraControl, ControlValueDescription, ControlValue, KnownCameraControl};
 
     const UTF8_ENCODING: usize = 4;
     type CGFloat = c_float;
@@ -364,14 +363,14 @@ mod internal {
     fn raw_fcc_to_frameformat(raw: OSType) -> Option<FrameFormat> {
         match raw {
             kCMVideoCodecType_422YpCbCr8 | kCMPixelFormat_422YpCbCr8_yuvs => {
-                Some(FrameFormat::YUYV)
+                Some(FrameFormat::Yuyv422)
             }
-            kCMVideoCodecType_JPEG | kCMVideoCodecType_JPEG_OpenDML => Some(FrameFormat::MJPEG),
-            kCMPixelFormat_8IndexedGray_WhiteIsZero => Some(FrameFormat::GRAY),
+            kCMVideoCodecType_JPEG | kCMVideoCodecType_JPEG_OpenDML => Some(FrameFormat::MJpeg),
+            kCMPixelFormat_8IndexedGray_WhiteIsZero => Some(FrameFormat::Luma8),
             kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
             | kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-            | 875704438 => Some(FrameFormat::NV12),
-            kCMPixelFormat_24RGB => Some(FrameFormat::RAWRGB),
+            | 875704438 => Some(FrameFormat::Nv12),
+            kCMPixelFormat_24RGB => Some(FrameFormat::Rgb888),
             _ => None,
         }
     }
@@ -433,7 +432,7 @@ mod internal {
                     let ptr = bufferlck_cv.cast::<Sender<(Vec<u8>, FrameFormat)>>();
                     Arc::from_raw(ptr)
                 };
-                if let Err(_) = buffer_sndr.send((buffer_as_vec, FrameFormat::GRAY)) {
+                if let Err(_) = buffer_sndr.send((buffer_as_vec, FrameFormat::Luma8)) {
                     // FIXME: dont, what the fuck???
                     return;
                 }
@@ -533,7 +532,7 @@ mod internal {
         );
         let misc = nsstr_to_str(unsafe { msg_send![device, uniqueID] });
 
-        CameraInformation::new(name.as_ref(), &description, misc.as_ref(), index)
+        CameraInformation::new(name.to_string(), description, misc.to_string(), index)
     }
 
     #[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, Eq, PartialEq)]
@@ -908,13 +907,13 @@ mod internal {
                     let resolution = av_fmt.resolution;
                     av_fmt.fps_list.iter().map(move |fps_f64| {
                         let fps = *fps_f64 as u32;
-
+                        let frame_rate = FrameRate::frame_rate(fps as i32);
                         let resolution =
                             Resolution::new(resolution.width as u32, resolution.height as u32); // FIXME: what the fuck?
-                        CameraFormat::new(resolution, av_fmt.fourcc, fps)
+                        CameraFormat::new(resolution, av_fmt.fourcc, frame_rate)
                     })
                 })
-                .filter(|x| x.frame_rate() != 0)
+                .filter(|x| *x.frame_rate().denominator() != 0)
                 .collect())
         }
 
@@ -938,7 +937,7 @@ mod internal {
             }
             if self.already_in_use() {
                 return Err(NokhwaError::InitializeError {
-                    backend: ApiBackend::AVFoundation,
+                    backend: Backends::AVFoundation,
                     error: "Already in use".to_string(),
                 });
             }
@@ -995,9 +994,11 @@ mod internal {
                     }) {
                         let max_fps: f64 = unsafe { msg_send![range.inner, maxFrameRate] };
 
-                        if (f64::from(descriptor.frame_rate()) - max_fps).abs() < 0.01 {
-                            selected_range = range.inner;
-                            break;
+                        if let Some(f) = descriptor.frame_rate().approximate_float() {
+                            if (f64::from(f) - max_fps).abs() < 0.01 {
+                                selected_range = range.inner;
+                                break;
+                            }
                         }
                     }
                 }
@@ -2217,10 +2218,10 @@ mod internal {
                 .into_iter()
                 .map(move |fps_f64| {
                     let fps = fps_f64 as u32;
-
+                    let frame_rate = FrameRate::frame_rate(fps as i32);
                     let resolution =
                         Resolution::new(resolution.width as u32, resolution.height as u32); // FIXME: what the fuck?
-                    CameraFormat::new(resolution, fourcc, fps)
+                    CameraFormat::new(resolution, fourcc, frame_rate)
                 })
                 .collect::<Vec<_>>();
             a.sort_by(|a, b| a.frame_rate().cmp(&b.frame_rate()));

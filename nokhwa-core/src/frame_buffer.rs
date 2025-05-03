@@ -13,13 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-use std::borrow::Cow;
-use std::hash::{Hash, Hasher};
-use crate::frame_format::FrameFormat;
-use small_map::{FxSmallMap, Iter};
-use crate::control::ControlValue;
+use std::{
+    borrow::Cow,
+    hash::{Hash, Hasher},
+};
 
 pub use compact_str::CompactString;
+use small_map::{FxSmallMap, Iter};
+
+use crate::{control::ControlValue, frame_format::FrameFormat};
 
 pub type PlatformSpecificFlag = u32;
 
@@ -50,7 +52,7 @@ impl Metadata {
 
 impl Hash for Metadata {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        for (key, value) in self.flags {
+        for (key, value) in &self.flags {
             state.write(key.as_bytes());
             value.hash(state);
         }
@@ -87,10 +89,7 @@ impl FrameBuffer {
     #[must_use]
     #[inline]
     pub fn new(buffer: Cow<'static, [u8]>, metadata: Option<Metadata>) -> Self {
-        Self {
-            buffer,
-            metadata,
-        }
+        Self { buffer, metadata }
     }
 
     /// Get the data of this buffer.
@@ -100,12 +99,11 @@ impl FrameBuffer {
     }
 
     pub fn consume(self) -> (Cow<'static, [u8]>, Option<Metadata>) {
-        return (self.buffer, self.metadata)
+        return (self.buffer, self.metadata);
     }
 
     #[must_use]
     pub fn metadata(&self) -> Option<&Metadata> {
         self.metadata.as_ref()
     }
-
 }

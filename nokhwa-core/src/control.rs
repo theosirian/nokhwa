@@ -1,10 +1,18 @@
-use crate::error::{NokhwaError, NokhwaResult};
-use crate::ranges::{Range, ValidatableRange};
+use std::{
+    collections::{
+        HashMap, HashSet,
+        hash_map::{Keys, Values},
+    },
+    fmt::{Display, Formatter},
+    hash::Hash,
+};
+
 use ordered_float::OrderedFloat;
-use std::collections::hash_map::{Keys, Values};
-use std::collections::{HashMap, HashSet};
-use std::fmt::{Display, Formatter};
-use std::hash::Hash;
+
+use crate::{
+    error::{NokhwaError, NokhwaResult},
+    ranges::{Range, ValidatableRange},
+};
 
 pub type PlatformSpecificControlId = u64;
 
@@ -112,13 +120,19 @@ impl Controls {
         self.descriptions.keys()
     }
 
-    pub fn validate(&self, control_id: &ControlId, value: &ControlValue) -> Result<bool, NokhwaError> {
+    pub fn validate(
+        &self,
+        control_id: &ControlId,
+        value: &ControlValue,
+    ) -> Result<bool, NokhwaError> {
         let description = match self.descriptions.get(control_id) {
             Some(desc) => desc,
-            None => return Err(NokhwaError::GetPropertyError {
-                property: control_id.to_string(),
-                error: "ID Not Found".to_string(),
-            }),
+            None => {
+                return Err(NokhwaError::GetPropertyError {
+                    property: control_id.to_string(),
+                    error: "ID Not Found".to_string(),
+                });
+            }
         };
 
         if let None = self.values.get(control_id) {
@@ -233,11 +247,11 @@ pub enum ControlValueDescriptor {
     Null,
     Integer(Range<i64>),
     BitMask,
-    Float(Range<f64>),
+    Float(Range<OrderedFloat<f64>>),
     String,
     Boolean,
     // Array of any values of singular type
-    Array(ControlValueDescriptor),
+    Array(Box<ControlValueDescriptor>),
     // Menu(Enum) of valid choices
     // The keys are valid choices,
     // the values represent what the choice is (usually a string or int).
@@ -291,12 +305,12 @@ impl ControlValueDescriptor {
             }
             ControlValueDescriptor::Array(arr) => {
                 if let &ControlValue::Array(_) = value {
-                    return arr.is_valid_value(value);
+                    return arr.validate(value);
                 }
             }
             ControlValueDescriptor::Binary(size_limits) => {
                 if let ControlValue::Binary(bin) = value {
-                    return size_limits.validate(bin.len() as u64);
+                    return size_limits.validate(&(bin.len() as u64));
                 }
             }
             ControlValueDescriptor::Menu(choices) => {
@@ -430,6 +444,34 @@ impl ControlValue {
         }
 
         false
+    }
+
+    pub fn as_boolean(&self) -> Option<&bool> {
+        match self {
+            ControlValue::Boolean(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    pub fn as_float(&self) -> Option<&f64> {
+        match self {
+            ControlValue::Float(f) => Some(&f.0),
+            _ => None,
+        }
+    }
+
+    pub fn as_enum(&self) -> Option<&ControlValue> {
+        match self {
+            ControlValue::EnumPick(cv) => Some(&*cv),
+            _ => None,
+        }
+    }
+
+    pub fn as_point(&self) -> Option<&ControlValue> {
+        match self {
+            ControlValue::EnumPick(cv) => Some(&*cv),
+            _ => None,
+        }
     }
 }
 
